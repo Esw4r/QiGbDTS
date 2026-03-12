@@ -1,100 +1,112 @@
-# Quantum-Inspired Edge–Cloud Distributed Task Scheduling System
+# Quantum-Inspired Gossip-Based Distributed Task Scheduling System
 
-A distributed system that uses **quantum-inspired probabilistic scheduling** to route tasks between edge nodes and a cloud node over **real TCP socket connections**. Includes a live animated visualization dashboard.
+A fully decentralized distributed task scheduling system where **edge nodes communicate via gossip protocol** and use **quantum-inspired probabilistic scheduling** to decide whether to execute tasks locally or offload to peers. No central scheduler — every node is equal.
 
-## Quick Start (Single Machine)
+## Architecture
+
+```
+┌──────────┐     gossip/TCP     ┌──────────┐
+│  Edge 1  │◄──────────────────►│  Edge 2  │
+│ (Machine A)                    (Machine B)│
+└────┬─────┘                    └────┬─────┘
+     │              gossip/TCP       │
+     │          ┌──────────┐         │
+     └─────────►│  Edge 3  │◄────────┘
+                │(Machine C)│
+                └──────────┘
+                     │
+              HTTP POST events
+                     ▼
+              ┌──────────────┐
+              │  Dashboard   │   ← browser on any machine
+              │  (port 5000) │
+              └──────────────┘
+```
+
+- **No central scheduler** — each edge node makes its own scheduling decisions 
+- **Gossip protocol** — nodes share load state with random peers every 2 seconds
+- **Quantum-inspired** — offloading decisions use α/β probability amplitudes
+- **Real TCP sockets** — nodes connect to each other over the network
+
+## Quick Start (single machine)
 
 ```bash
-pip install flask flask-socketio networkx pyvis requests
+pip install flask flask-socketio requests
 python run_system.py
 ```
 
 Open **http://YOUR_IP:5000** in your browser.
 
----
-
 ## Multi-Machine Deployment
 
-Copy the entire `QiGbDTS/` folder to every machine. Install dependencies on each:
+Copy the project to each machine. Install dependencies:
 
 ```bash
-pip install flask flask-socketio networkx pyvis requests
+pip install flask flask-socketio requests
 ```
 
-### Step 1 — Dashboard + Scheduler (Machine A)
+### Machine A — Dashboard + Edge 1
 
 ```bash
-# Start the dashboard (accessible from any machine on the network)
 python visualization/dashboard.py --host 0.0.0.0 --port 5000
 
-# In another terminal, start the scheduler
-python scheduler/scheduler_server.py --host 0.0.0.0 --port 9000 --dashboard-url http://MACHINE_A_IP:5000
+python edge_nodes/edge_node.py --id edge1 --port 8001 \
+  --peers edge2=MACHINE_B_IP:8002 edge3=MACHINE_C_IP:8003 \
+  --dashboard-url http://MACHINE_A_IP:5000
 ```
 
-Replace `MACHINE_A_IP` with Machine A's actual IP (e.g. `192.168.1.100`).
-
-### Step 2 — Cloud Worker (Machine B)
+### Machine B — Edge 2
 
 ```bash
-python cloud/cloud_worker.py --scheduler-host MACHINE_A_IP --scheduler-port 9000
+python edge_nodes/edge_node.py --id edge2 --port 8002 \
+  --peers edge1=MACHINE_A_IP:8001 edge3=MACHINE_C_IP:8003 \
+  --dashboard-url http://MACHINE_A_IP:5000
 ```
 
-### Step 3 — Edge Nodes (Machines C, D, E...)
-
-On each edge machine:
+### Machine C — Edge 3
 
 ```bash
-python edge_nodes/edge_node.py --id edge1 --scheduler-host MACHINE_A_IP --scheduler-port 9000
+python edge_nodes/edge_node.py --id edge3 --port 8003 \
+  --peers edge1=MACHINE_A_IP:8001 edge2=MACHINE_B_IP:8002 \
+  --dashboard-url http://MACHINE_A_IP:5000
 ```
 
-Use a unique `--id` for each edge (e.g. `edge1`, `edge2`, `edge3`).
-
-### Step 4 — View Dashboard
-
-Open `http://MACHINE_A_IP:5000` in any browser on the network.
-
-The dashboard will show:
-- **Real IP addresses** of every connected node
-- **Animated task dots** moving between nodes
-- **Live scheduler state** (α, β, P(edge), P(cloud))
-- **System metrics** (latency, utilization, distribution)
-- **Event log** with all task lifecycle events
-
----
-
-## Architecture
+## Project Structure
 
 ```
-Edge Node 1 (Machine C)  ──TCP──┐
-Edge Node 2 (Machine D)  ──TCP──┤
-Edge Node 3 (Machine E)  ──TCP──┼──▶  Scheduler (Machine A:9000)  ──TCP──▶  Cloud Worker (Machine B)
-                                │              │
-                                │              │ HTTP POST events
-                                │              ▼
-                                │     Dashboard (Machine A:5000)
-                                │              │
-                                │              │ WebSocket
-                                │              ▼
-                                └───  Browser (any machine)
+QiGbDTS/
+├── common/
+│   ├── config.py              # Node capacities, peer addresses, gossip params
+│   ├── network_protocol.py    # Length-prefixed TCP messaging
+│   └── task_model.py          # Task dataclass
+├── edge_nodes/
+│   ├── edge_node.py           # Gossip-based edge node (TCP server+client)
+│   └── workload_generator.py  # Random task generation
+├── visualization/
+│   ├── dashboard.py           # Flask+SocketIO server
+│   └── templates/
+│       └── dashboard.html     # Full-screen network graph
+├── run_system.py              # Local launcher
+└── README.md
 ```
+
+## How It Works
+
+1. Each edge node starts a **TCP server** and connects to all peers
+2. Every 2 seconds, each node **gossips** its load to random peers  
+3. When a task is generated, the node compares its load with peers'
+4. If a peer is less loaded → **quantum-inspired probability** decides:
+   - Offload to the least-loaded peer, OR
+   - Execute locally
+5. Offloaded tasks are sent as `TASK_OFFLOAD` messages; results come back as `TASK_RESULT`
+6. The **dashboard** graph shows nodes, connections, and animated dots for offloaded tasks
 
 ## CLI Reference
 
-| Component | Flag | Default | Description |
-|-----------|------|---------|-------------|
-| Scheduler | `--host` | `0.0.0.0` | Bind address |
-| Scheduler | `--port` | `9000` | Bind port |
-| Scheduler | `--dashboard-url` | `http://127.0.0.1:5000` | Dashboard endpoint |
-| Edge Node | `--id` | *(required)* | Unique node ID |
-| Edge Node | `--scheduler-host` | `127.0.0.1` | Scheduler IP |
-| Edge Node | `--scheduler-port` | `9000` | Scheduler port |
-| Cloud Worker | `--scheduler-host` | `127.0.0.1` | Scheduler IP |
-| Cloud Worker | `--scheduler-port` | `9000` | Scheduler port |
-| Dashboard | `--host` | `0.0.0.0` | Bind address |
-| Dashboard | `--port` | `5000` | Bind port |
-
-## Troubleshooting
-
-- **"Connection refused"** — Ensure the scheduler is running and the IP/port are correct. Check your firewall allows TCP port 9000 and 5000.
-- **Dashboard not showing nodes** — Make sure `--dashboard-url` points to the machine running the dashboard.
-- **Windows Firewall** — You may need to allow Python through Windows Defender Firewall for incoming connections.
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--id` | *(required)* | Unique node ID (e.g. `edge1`) |
+| `--host` | `0.0.0.0` | Bind address |
+| `--port` | from config | TCP port for peer connections |
+| `--peers` | from config | Peer list: `edge2=host:port edge3=host:port` |
+| `--dashboard-url` | `http://127.0.0.1:5000` | Dashboard endpoint |

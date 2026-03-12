@@ -1,5 +1,5 @@
 """
-Network Protocol for inter-process communication over TCP sockets.
+Network Protocol for gossip-based peer-to-peer communication over TCP sockets.
 Uses length-prefixed JSON messages.
 """
 
@@ -8,12 +8,10 @@ import struct
 import socket
 
 # ── Message Types ───────────────────────────────────────────────────
-MSG_TASK_SUBMIT = "TASK_SUBMIT"
-MSG_SCHEDULE_DECISION = "SCHEDULE_DECISION"
-MSG_TASK_COMPLETE = "TASK_COMPLETE"
-MSG_NODE_STATUS = "NODE_STATUS"
-MSG_NODE_HEARTBEAT = "NODE_HEARTBEAT"
-MSG_REGISTER = "REGISTER"
+MSG_GOSSIP_STATE = "GOSSIP_STATE"       # periodic state broadcast
+MSG_TASK_OFFLOAD = "TASK_OFFLOAD"       # offload a task to a peer
+MSG_TASK_RESULT = "TASK_RESULT"         # result of an offloaded task
+MSG_REGISTER = "REGISTER"              # initial handshake
 
 
 def build_message(msg_type: str, payload: dict) -> dict:
