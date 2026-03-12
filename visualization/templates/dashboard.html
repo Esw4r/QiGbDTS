@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quantum Edge-Cloud Scheduler Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+<style>
+  /* ── Reset & Variables ──────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:        #0b0e17;
+    --surface:   rgba(17,21,35,0.85);
+    --border:    rgba(100,120,200,0.18);
+    --accent:    #6c63ff;
+    --accent2:   #00e5ff;
+    --text:      #e0e6f0;
+    --text-dim:  #7a839b;
+    --edge-col:  #00bfff;
+    --cloud-col: #ff9800;
+    --high-col:  #ff1744;
+    --green:     #00e676;
+    --red:       #ff5252;
+    --radius:    14px;
+    --glass:     saturate(180%) blur(16px);
+  }
+
+  body {
+    font-family: 'Segoe UI', 'Inter', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Animated gradient background */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: -1;
+    background:
+      radial-gradient(ellipse 80% 60% at 20% 10%, rgba(108,99,255,0.12) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 50% at 80% 90%, rgba(0,229,255,0.10) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 40% at 50% 50%, rgba(255,152,0,0.06) 0%, transparent 60%);
+  }
+
+  /* ── Header ─────────────────────────────────────────────────────── */
+  header {
+    text-align: center;
+    padding: 28px 20px 14px;
+  }
+  header h1 {
+    font-size: 1.65rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: 0.5px;
+  }
+  header p { color: var(--text-dim); font-size: 0.88rem; margin-top: 4px; }
+
+  /* ── Layout ─────────────────────────────────────────────────────── */
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1.6fr 1fr;
+    gap: 16px;
+    padding: 10px 22px 30px;
+    max-width: 1440px;
+    margin: 0 auto;
+  }
+
+  /* ── Panels ─────────────────────────────────────────────────────── */
+  .panel {
+    background: var(--surface);
+    backdrop-filter: var(--glass);
+    -webkit-backdrop-filter: var(--glass);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel h2 {
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent2);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .panel h2 .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--accent2);
+    box-shadow: 0 0 6px var(--accent2);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+
+  /* ── Canvas Area ────────────────────────────────────────────────── */
+  .canvas-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4/3;
+    border-radius: 10px;
+    overflow: hidden;
+    background: rgba(0,0,0,0.25);
+  }
+  canvas { width: 100%; height: 100%; display: block; }
+
+  /* ── Node Status Panel ──────────────────────────────────────────── */
+  .node-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .node-row:last-child { border-bottom: none; }
+  .node-name {
+    font-weight: 600;
+    font-size: 0.92rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .node-info {
+    display: flex;
+    flex-direction: column;
+  }
+  .node-ip {
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    font-family: 'Consolas', 'Fira Code', monospace;
+    margin-top: 1px;
+  }
+  .status-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 100px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .status-badge.online  { background: rgba(0,230,118,0.15); color: var(--green); }
+  .status-badge.offline { background: rgba(255,82,82,0.15);  color: var(--red);   }
+  .status-badge.waiting { background: rgba(255,193,7,0.15);  color: #ffc107;      }
+  .task-count {
+    font-size: 1.3rem;
+    font-weight: 700;
+    min-width: 32px;
+    text-align: right;
+  }
+
+  /* ── Scheduler State ────────────────────────────────────────────── */
+  .state-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .state-card {
+    background: rgba(255,255,255,0.04);
+    border-radius: 10px;
+    padding: 12px 14px;
+    text-align: center;
+  }
+  .state-card .label {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+  .state-card .value {
+    font-size: 1.4rem;
+    font-weight: 700;
+  }
+
+  /* Probability bar */
+  .prob-bar-wrap {
+    background: rgba(255,255,255,0.06);
+    border-radius: 100px;
+    height: 14px;
+    overflow: hidden;
+    margin-top: 10px;
+    position: relative;
+  }
+  .prob-bar-edge {
+    height: 100%;
+    background: linear-gradient(90deg, var(--edge-col), var(--accent));
+    transition: width 0.5s ease;
+    border-radius: 100px 0 0 100px;
+  }
+  .prob-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  /* ── Metrics ────────────────────────────────────────────────────── */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .metric-card {
+    background: rgba(255,255,255,0.04);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .metric-card .label {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .metric-card .value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin-top: 2px;
+  }
+
+  /* ── Event Log ──────────────────────────────────────────────────── */
+  .event-log {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 220px;
+    font-size: 0.8rem;
+    font-family: 'Consolas', 'Fira Code', monospace;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .event-log::-webkit-scrollbar { width: 5px; }
+  .event-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+  .log-entry {
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(100,120,200,0.08);
+    display: flex;
+    gap: 8px;
+    animation: fadeIn 0.3s ease;
+  }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+  .log-time { color: var(--text-dim); white-space: nowrap; }
+  .log-msg  { word-break: break-word; }
+  .log-msg.task_created   { color: var(--edge-col); }
+  .log-msg.task_scheduled { color: var(--accent); }
+  .log-msg.task_completed { color: var(--green); }
+  .log-msg.failure        { color: var(--red); }
+  .log-msg.recovery       { color: var(--green); }
+  .log-msg.reroute        { color: var(--cloud-col); }
+  .log-msg.congestion     { color: var(--cloud-col); }
+  .log-msg.connection     { color: var(--text-dim); }
+  .log-msg.system         { color: var(--accent2); }
+
+  /* ── Legend ──────────────────────────────────────────────────────── */
+  .legend {
+    display: flex;
+    gap: 18px;
+    margin-top: 10px;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    flex-wrap: wrap;
+  }
+  .legend span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .legend .swatch {
+    width: 12px; height: 12px;
+    border-radius: 3px;
+  }
+
+  /* ── Responsive ─────────────────────────────────────────────────── */
+  @media (max-width: 1024px) {
+    .grid { grid-template-columns: 1fr; }
+    .canvas-wrap { aspect-ratio: 16/9; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⚛ Quantum Edge-Cloud Scheduler</h1>
+  <p>Distributed Task Scheduling — Live Network Dashboard</p>
+</header>
+
+<div class="grid">
+  <!-- ─── LEFT COLUMN ────────────────────────────────────────────── -->
+  <div style="display:flex; flex-direction:column; gap:16px;">
+    <!-- Node Status -->
+    <div class="panel" id="panel-nodes">
+      <h2><span class="dot"></span> Connected Nodes</h2>
+      <div id="node-status">
+        <div class="node-row" data-node="edge1">
+          <div class="node-info">
+            <span class="node-name">🖥 Edge 1 <span class="status-badge waiting" id="badge-edge1">waiting</span></span>
+            <span class="node-ip" id="ip-edge1">not connected</span>
+          </div>
+          <span class="task-count" id="tasks-edge1">0</span>
+        </div>
+        <div class="node-row" data-node="edge2">
+          <div class="node-info">
+            <span class="node-name">🖥 Edge 2 <span class="status-badge waiting" id="badge-edge2">waiting</span></span>
+            <span class="node-ip" id="ip-edge2">not connected</span>
+          </div>
+          <span class="task-count" id="tasks-edge2">0</span>
+        </div>
+        <div class="node-row" data-node="edge3">
+          <div class="node-info">
+            <span class="node-name">🖥 Edge 3 <span class="status-badge waiting" id="badge-edge3">waiting</span></span>
+            <span class="node-ip" id="ip-edge3">not connected</span>
+          </div>
+          <span class="task-count" id="tasks-edge3">0</span>
+        </div>
+        <div class="node-row" data-node="cloud">
+          <div class="node-info">
+            <span class="node-name">☁ Cloud <span class="status-badge waiting" id="badge-cloud">waiting</span></span>
+            <span class="node-ip" id="ip-cloud">not connected</span>
+          </div>
+          <span class="task-count" id="tasks-cloud">0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scheduler State -->
+    <div class="panel" id="panel-scheduler">
+      <h2><span class="dot"></span> Scheduler State</h2>
+      <div class="state-grid">
+        <div class="state-card"><div class="label">α</div><div class="value" id="val-alpha">0.707</div></div>
+        <div class="state-card"><div class="label">β</div><div class="value" id="val-beta">0.707</div></div>
+        <div class="state-card"><div class="label">P(edge)</div><div class="value" id="val-p-edge" style="color:var(--edge-col)">0.500</div></div>
+        <div class="state-card"><div class="label">P(cloud)</div><div class="value" id="val-p-cloud" style="color:var(--cloud-col)">0.500</div></div>
+      </div>
+      <div class="prob-bar-wrap">
+        <div class="prob-bar-edge" id="prob-bar" style="width:50%"></div>
+      </div>
+      <div class="prob-labels">
+        <span>Edge</span>
+        <span>Cloud</span>
+      </div>
+    </div>
+
+    <!-- Metrics -->
+    <div class="panel">
+      <h2><span class="dot"></span> System Metrics</h2>
+      <div class="metrics-grid">
+        <div class="metric-card"><div class="label">Avg Latency</div><div class="value" id="m-latency">0.000s</div></div>
+        <div class="metric-card"><div class="label">Completed</div><div class="value" id="m-completed">0</div></div>
+        <div class="metric-card"><div class="label">Edge Util</div><div class="value" id="m-edge-util">0%</div></div>
+        <div class="metric-card"><div class="label">Cloud Util</div><div class="value" id="m-cloud-util">0%</div></div>
+        <div class="metric-card"><div class="label">Edge Done</div><div class="value" id="m-edge-done" style="color:var(--edge-col)">0</div></div>
+        <div class="metric-card"><div class="label">Cloud Done</div><div class="value" id="m-cloud-done" style="color:var(--cloud-col)">0</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── CENTER: CANVAS ─────────────────────────────────────────── -->
+  <div class="panel" style="display:flex; flex-direction:column; gap:10px;">
+    <h2><span class="dot"></span> Network Topology & Task Flow</h2>
+    <div class="canvas-wrap">
+      <canvas id="topoCanvas"></canvas>
+    </div>
+    <div class="legend">
+      <span><span class="swatch" style="background:var(--edge-col)"></span> Edge task</span>
+      <span><span class="swatch" style="background:var(--cloud-col)"></span> Cloud task</span>
+      <span><span class="swatch" style="background:var(--high-col)"></span> High priority</span>
+      <span><span class="swatch" style="background:var(--green)"></span> Online</span>
+      <span><span class="swatch" style="background:var(--red)"></span> Offline</span>
+    </div>
+  </div>
+
+  <!-- ─── RIGHT: EVENT LOG ───────────────────────────────────────── -->
+  <div class="panel">
+    <h2><span class="dot"></span> Event Log</h2>
+    <div class="event-log" id="event-log"></div>
+  </div>
+</div>
+
+<script>
+// ── SocketIO ──────────────────────────────────────────────────────
+const socket = io();
+
+// ── Topology Layout (fixed positions, normalised 0-1) ──────────
+const NODES = {
+  edge1:     { x: 0.12, y: 0.22, label: 'Edge 1', ip: '', icon: '🖥', type: 'edge' },
+  edge2:     { x: 0.12, y: 0.50, label: 'Edge 2', ip: '', icon: '🖥', type: 'edge' },
+  edge3:     { x: 0.12, y: 0.78, label: 'Edge 3', ip: '', icon: '🖥', type: 'edge' },
+  scheduler: { x: 0.50, y: 0.50, label: 'Scheduler', ip: 'this machine', icon: '⚛', type: 'scheduler' },
+  cloud:     { x: 0.88, y: 0.50, label: 'Cloud', ip: '', icon: '☁', type: 'cloud' },
+};
+
+const EDGES = [
+  ['edge1','scheduler'], ['edge2','scheduler'], ['edge3','scheduler'],
+  ['scheduler','cloud'],
+];
+
+let onlineNodes = new Set(['scheduler']);
+let dots = [];  // { task_id, origin, decision, color, phase, progress }
+
+// ── Canvas setup ──────────────────────────────────────────
+const canvas = document.getElementById('topoCanvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width  = rect.width  * devicePixelRatio;
+  canvas.height = rect.height * devicePixelRatio;
+  W = canvas.width;
+  H = canvas.height;
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  W = rect.width;
+  H = rect.height;
+}
+window.addEventListener('resize', resize);
+resize();
+
+function nx(n) { return NODES[n].x * W; }
+function ny(n) { return NODES[n].y * H; }
+
+// ── Draw helpers ──────────────────────────────────────────
+function drawEdge(a, b) {
+  const online_a = onlineNodes.has(a);
+  const online_b = onlineNodes.has(b);
+  ctx.beginPath();
+  ctx.moveTo(nx(a), ny(a));
+  ctx.lineTo(nx(b), ny(b));
+  ctx.strokeStyle = (online_a && online_b) ? 'rgba(108,99,255,0.25)' : 'rgba(255,82,82,0.12)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash((online_a && online_b) ? [] : [6, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function drawNode(id) {
+  const n = NODES[id];
+  const x = n.x * W, y = n.y * H;
+  const r = id === 'scheduler' ? 34 : (id === 'cloud' ? 32 : 26);
+  const online = onlineNodes.has(id);
+
+  // Glow
+  const glow = ctx.createRadialGradient(x, y, r*0.3, x, y, r*1.8);
+  if (id === 'scheduler') {
+    glow.addColorStop(0, 'rgba(108,99,255,0.25)');
+  } else if (id === 'cloud') {
+    glow.addColorStop(0, online ? 'rgba(255,152,0,0.20)' : 'rgba(255,82,82,0.10)');
+  } else {
+    glow.addColorStop(0, online ? 'rgba(0,191,255,0.20)' : 'rgba(255,82,82,0.15)');
+  }
+  glow.addColorStop(1, 'transparent');
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(x, y, r*1.8, 0, Math.PI*2);
+  ctx.fill();
+
+  // Circle
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI*2);
+  if (id === 'scheduler') {
+    const g = ctx.createLinearGradient(x-r, y-r, x+r, y+r);
+    g.addColorStop(0, '#6c63ff');
+    g.addColorStop(1, '#b388ff');
+    ctx.fillStyle = g;
+  } else if (id === 'cloud') {
+    ctx.fillStyle = online ? '#ff9800' : '#663d00';
+  } else {
+    ctx.fillStyle = online ? '#00bfff' : '#5a1a1a';
+  }
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Icon
+  ctx.font = `${r*0.8}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = online ? '#fff' : 'rgba(255,255,255,0.4)';
+  ctx.fillText(n.icon, x, y);
+
+  // Label
+  ctx.font = '600 11px "Segoe UI", system-ui, sans-serif';
+  ctx.fillStyle = '#c0c8e0';
+  ctx.fillText(n.label, x, y + r + 16);
+
+  // IP label under the name
+  if (n.ip) {
+    ctx.font = '10px "Consolas", monospace';
+    ctx.fillStyle = online ? 'rgba(0,229,255,0.7)' : 'rgba(255,82,82,0.5)';
+    ctx.fillText(n.ip, x, y + r + 28);
+  }
+
+  // Status dot
+  if (n.type === 'edge' || n.type === 'cloud') {
+    ctx.beginPath();
+    ctx.arc(x + r*0.7, y - r*0.7, 5, 0, Math.PI*2);
+    ctx.fillStyle = online ? '#00e676' : '#ff5252';
+    ctx.fill();
+  }
+}
+
+function drawDot(dot) {
+  let fromId, toId;
+  if (dot.phase === 'to_scheduler') {
+    fromId = dot.origin;
+    toId = 'scheduler';
+  } else {
+    fromId = 'scheduler';
+    toId = dot.decision;
+  }
+  if (!NODES[fromId] || !NODES[toId]) return;
+
+  const t = Math.min(dot.progress, 1);
+  const x = nx(fromId) + (nx(toId) - nx(fromId)) * t;
+  const y = ny(fromId) + (ny(toId) - ny(fromId)) * t;
+
+  // Trail
+  ctx.beginPath();
+  ctx.arc(x, y, 10, 0, Math.PI*2);
+  const trail = ctx.createRadialGradient(x, y, 0, x, y, 10);
+  trail.addColorStop(0, dot.color);
+  trail.addColorStop(1, 'transparent');
+  ctx.fillStyle = trail;
+  ctx.fill();
+
+  // Dot
+  ctx.beginPath();
+  ctx.arc(x, y, 5, 0, Math.PI*2);
+  ctx.fillStyle = dot.color;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Task ID label
+  ctx.font = '600 8px monospace';
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.fillText(dot.task_id.slice(0,4), x, y - 10);
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  EDGES.forEach(([a,b]) => drawEdge(a,b));
+  Object.keys(NODES).forEach(id => drawNode(id));
+  dots.forEach(d => drawDot(d));
+  requestAnimationFrame(draw);
+}
+draw();
+
+// ── SocketIO event handlers ───────────────────────────────
+socket.on('dots_update', (data) => { dots = data; });
+socket.on('dot_add', (d) => { dots.push(d); });
+socket.on('dot_remove', (d) => { dots = dots.filter(x => x.task_id !== d.task_id); });
+
+socket.on('node_status', (data) => {
+  const et = data.edge_tasks || {};
+  // Update task counts for all known edge nodes
+  Object.keys(et).forEach(eid => {
+    const el = document.getElementById('tasks-' + eid);
+    if (el) el.textContent = et[eid] || 0;
+  });
+  document.getElementById('tasks-cloud').textContent = data.cloud_tasks || 0;
+
+  const online = new Set(data.online_nodes || []);
+  online.add('scheduler');  // scheduler is always online
+  onlineNodes = online;
+
+  // Update IP addresses
+  const ips = data.node_ips || {};
+  Object.keys(ips).forEach(nid => {
+    const ipEl = document.getElementById('ip-' + nid);
+    if (ipEl) ipEl.textContent = ips[nid];
+    // Also update the canvas node IP
+    if (NODES[nid]) NODES[nid].ip = ips[nid].split(':')[0]; // just IP, no port
+  });
+
+  // Update badges
+  ['edge1','edge2','edge3','cloud'].forEach(nid => {
+    const badge = document.getElementById('badge-' + nid);
+    const ipEl = document.getElementById('ip-' + nid);
+    if (online.has(nid)) {
+      badge.textContent = 'online';
+      badge.className = 'status-badge online';
+    } else if (ips[nid]) {
+      badge.textContent = 'offline';
+      badge.className = 'status-badge offline';
+    } else {
+      badge.textContent = 'waiting';
+      badge.className = 'status-badge waiting';
+      if (ipEl && !ips[nid]) ipEl.textContent = 'not connected';
+    }
+  });
+});
+
+socket.on('metrics', (data) => {
+  document.getElementById('val-alpha').textContent   = data.alpha   ?? '—';
+  document.getElementById('val-beta').textContent    = data.beta    ?? '—';
+  document.getElementById('val-p-edge').textContent  = data.p_edge  ?? '—';
+  document.getElementById('val-p-cloud').textContent = data.p_cloud ?? '—';
+
+  const pEdge = (data.p_edge ?? 0.5) * 100;
+  document.getElementById('prob-bar').style.width = pEdge + '%';
+
+  document.getElementById('m-latency').textContent   = (data.avg_latency ?? 0).toFixed(3) + 's';
+  document.getElementById('m-completed').textContent = data.tasks_completed ?? 0;
+  document.getElementById('m-edge-util').textContent = Math.round((data.edge_utilization ?? 0) * 100) + '%';
+  document.getElementById('m-cloud-util').textContent= Math.round((data.cloud_utilization ?? 0) * 100) + '%';
+  document.getElementById('m-edge-done').textContent = data.edge_completed ?? 0;
+  document.getElementById('m-cloud-done').textContent= data.cloud_completed ?? 0;
+});
+
+socket.on('event', (data) => {
+  const log = document.getElementById('event-log');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+
+  const ts = new Date((data.timestamp || Date.now()/1000) * 1000);
+  const time = ts.toLocaleTimeString();
+
+  entry.innerHTML = `<span class="log-time">${time}</span><span class="log-msg ${data.event_type || ''}">${data.message || ''}</span>`;
+  log.prepend(entry);
+
+  // Cap log entries
+  while (log.children.length > 200) log.removeChild(log.lastChild);
+});
+</script>
+</body>
+</html>
