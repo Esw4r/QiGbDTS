@@ -50,25 +50,19 @@ pip install flask flask-socketio requests
 ```bash
 python visualization/dashboard.py --host 0.0.0.0 --port 5000
 
-python edge_nodes/edge_node.py --id edge1 --port 8001 \
-  --peers edge2=MACHINE_B_IP:8002 edge3=MACHINE_C_IP:8003 \
-  --dashboard-url http://MACHINE_A_IP:5000
+python edge_nodes/edge_node.py --id edge1 --port 8001 --peers edge2=MACHINE_B_IP:8002 edge3=MACHINE_C_IP:8003 --dashboard-url http://MACHINE_A_IP:5000
 ```
 
 ### Machine B — Edge 2
 
 ```bash
-python edge_nodes/edge_node.py --id edge2 --port 8002 \
-  --peers edge1=MACHINE_A_IP:8001 edge3=MACHINE_C_IP:8003 \
-  --dashboard-url http://MACHINE_A_IP:5000
+python edge_nodes/edge_node.py --id edge2 --port 8002 --peers edge1=MACHINE_A_IP:8001 edge3=MACHINE_C_IP:8003 --dashboard-url http://MACHINE_A_IP:5000
 ```
 
 ### Machine C — Edge 3
 
 ```bash
-python edge_nodes/edge_node.py --id edge3 --port 8003 \
-  --peers edge1=MACHINE_A_IP:8001 edge2=MACHINE_B_IP:8002 \
-  --dashboard-url http://MACHINE_A_IP:5000
+python edge_nodes/edge_node.py --id edge3 --port 8003 --peers edge1=MACHINE_A_IP:8001 edge2=MACHINE_B_IP:8002 --dashboard-url http://MACHINE_A_IP:5000
 ```
 
 ## Project Structure
