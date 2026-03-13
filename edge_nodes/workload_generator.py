@@ -1,5 +1,5 @@
 """
-Workload Generator — creates random Task instances with realistic attributes.
+Workload Generator — creates random Task instances
 """
 
 import random
